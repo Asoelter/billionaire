@@ -65,8 +65,10 @@ struct Player
     Vec2   acceleration;
 };
 
-void drawMap(sf::RenderWindow& window, Map const & map, sf::Transform const & worldTransform);
-void drawPlayer(sf::RenderWindow& window, Player const & player, sf::Transform worldTransform);
+constexpr auto microsecondsInSecond = 1000000.0f;
+
+void drawMap(sf::RenderWindow& window, Map const & map);
+void drawPlayer(sf::RenderWindow& window, Player const & player);
 void applyGravity(std::chrono::microseconds deltaTime, Player & player);
 void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player);
 
@@ -81,6 +83,7 @@ int main()
     }
 
     auto window = sf::RenderWindow(videoMode, "Cool game");
+    window.setVerticalSyncEnabled(true);
 
     // Next we're going to create a matrix to define our world position. By default, SFML
     // uses pixels as world space (this is dumb). We don't want to work with pixels. So,
@@ -89,9 +92,11 @@ int main()
     auto const screenWindowWidth = window.getSize().x;
     auto const worldWindowWidth = 100.0f;
     auto const scale = screenWindowWidth / worldWindowWidth;
-    auto worldTransform = sf::Transform();
-    worldTransform.scale({scale, scale});
     auto const worldWindowHeight = window.getSize().y / scale;
+
+    auto currentView = window.getView();
+    currentView.reset({{0, 0}, {worldWindowWidth, worldWindowHeight}});
+    window.setView(currentView);
 
     auto event = sf::Event();
 
@@ -110,6 +115,10 @@ int main()
 
     std::chrono::microseconds prevFrameDuration = std::chrono::microseconds::zero();
 
+    auto frameRateFont = sf::Font();
+    auto const success = frameRateFont.loadFromFile("/Library/Fonts/Arial Unicode.ttf");
+    assert(success);
+
     while (window.isOpen()) {
         auto const beginFrameTime = std::chrono::system_clock::now();
 
@@ -121,33 +130,16 @@ int main()
                 } break;
                 case sf::Event::KeyPressed:
                 {
-                    constexpr auto microsecondsInSecond = 1000000.0f;
-
                     if (event.key.code == sf::Keyboard::Key::W || event.key.code == sf::Keyboard::Key::Up) {
-                        //auto view = window.getView();
-                        //view.move({0.0f, -10.0f}); // remember +y is down (for now)
-                        //window.setView(view);
-                        //player.acceleration.y -= (prevFrameDuration.count() / microsecondsInSecond) * 100.0f;
-                        player.acceleration.y -= 10.0f;
+                        player.acceleration.y = -10.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::A || event.key.code == sf::Keyboard::Key::Left) {
-                        //auto view = window.getView();
-                        //view.move({-10.0f, 0.0f});
-                        //window.setView(view);
-                        //player.acceleration.x -= (prevFrameDuration.count() / microsecondsInSecond) * 100.0f;
                         player.acceleration.x = -20.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::S || event.key.code == sf::Keyboard::Key::Down) {
-                        //auto view = window.getView();
-                        //view.move({0.0f, 10.0f}); // remember +y is down (for now)
-                        //window.setView(view);
-                        player.acceleration.y += 40.0f;
+                        player.acceleration.y = 40.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::D || event.key.code == sf::Keyboard::Key::Right) {
-                        //auto view = window.getView();
-                        //view.move({10.0f, 0.0f});
-                        //window.setView(view);
-                        //player.acceleration.x += (prevFrameDuration.count() / microsecondsInSecond) * 100.0f;
                         player.acceleration.x = 20.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Escape || event.key.code == sf::Keyboard::Key::Q) {
@@ -155,6 +147,23 @@ int main()
                     }
                     printf("acceleration: (x:%f, y:%f)\n", player.acceleration.x, player.acceleration.y);
                     printf("velocity:     (x:%f, y:%f)\n", player.velocity.x, player.velocity.y);
+
+                } break;
+                case sf::Event::KeyReleased:
+                {
+                    if (event.key.code == sf::Keyboard::Key::W || event.key.code == sf::Keyboard::Key::Up) {
+                        player.acceleration.y = 0;
+                    }
+                    else if (event.key.code == sf::Keyboard::Key::A || event.key.code == sf::Keyboard::Key::Left) {
+                        player.acceleration.x = 0;
+                    }
+                    else if (event.key.code == sf::Keyboard::Key::S || event.key.code == sf::Keyboard::Key::Down) {
+                        player.acceleration.y = 0;
+                    }
+                    else if (event.key.code == sf::Keyboard::Key::D || event.key.code == sf::Keyboard::Key::Right) {
+                        player.acceleration.x = 0;
+                    }
+
                 } break;
                 default: break; // ignore other events for now
             }
@@ -164,9 +173,22 @@ int main()
 
         updatePhysics(prevFrameDuration, map, player);
 
+        static auto printCount = 0;
+
+        auto currentView = window.getView();
+        currentView.setCenter({player.position.x, player.position.y});
+        window.setView(currentView);
+
         window.clear(); // begin frame
-        drawMap(window, map, worldTransform);
-        drawPlayer(window, player, worldTransform);
+        drawMap(window, map);
+        drawPlayer(window, player);
+
+        auto const frameRate = 1.0 / prevFrameDuration.count() * microsecondsInSecond;
+        auto const txt = std::to_string(frameRate);
+        auto frameRateText = sf::Text(txt, frameRateFont);
+        frameRateText.setCharacterSize(12);
+        window.draw(frameRateText);
+
         window.display(); // end frame
         auto const endFrameTime = std::chrono::system_clock::now();
         prevFrameDuration = std::chrono::duration_cast<decltype(prevFrameDuration)>(endFrameTime - beginFrameTime);
@@ -175,7 +197,7 @@ int main()
     return 0;
 }
 
-void drawMap(sf::RenderWindow& window, Map const & map, sf::Transform const & worldTransform)
+void drawMap(sf::RenderWindow& window, Map const & map)
 {
     auto floor = sf::RectangleShape({map.width, map.floorHeight});
     floor.move({0.0f, map.floorHeight});
@@ -184,29 +206,27 @@ void drawMap(sf::RenderWindow& window, Map const & map, sf::Transform const & wo
     auto sky = sf::RectangleShape({map.width, map.floorHeight});
     sky.setFillColor(map.skyColor);
 
-    window.draw(floor, worldTransform);
-    window.draw(sky, worldTransform);
+    window.draw(floor);
+    window.draw(sky);
 }
 
-void drawPlayer(sf::RenderWindow& window, Player const & player, sf::Transform worldTransform)
+void drawPlayer(sf::RenderWindow& window, Player const & player)
 {
     auto rect = sf::RectangleShape({player.boundingBox.width, player.boundingBox.height});
     rect.move({player.position.x, player.position.y});
     rect.setFillColor(sf::Color::Green);
 
-    window.draw(rect, worldTransform);
+    window.draw(rect);
 }
 
 void applyGravity(std::chrono::microseconds deltaTime, Player & player)
 {
-    constexpr auto microsecondsInSecond = 1000000.0f;
     constexpr auto gravity = 9.81f; // m / s^2
     player.acceleration.y += (deltaTime.count() / microsecondsInSecond) * gravity;
 }
 
 void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player)
 {
-    constexpr auto microsecondsInSecond = 1000000.0f;
     auto const deltaTimeInSeconds = deltaTime.count() / microsecondsInSecond;
 
     auto const newPlayerPosition = ((1.0 / 2.0) * player.acceleration * (deltaTimeInSeconds * deltaTimeInSeconds))
@@ -214,25 +234,16 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
                                  + player.position;
 
     auto newPlayerVelocity = (player.acceleration * deltaTimeInSeconds) + player.velocity;
-    //newPlayerVelocity -= 0.01 * newPlayerVelocity;
-
-    static auto printCount = 0;
-
-    if (printCount++ < 0) {
-        printf("\n\n");
-        printf("newPlayerPosition.y: %f\tmap.floorHeight: %f\n", newPlayerPosition.y, map.floorHeight);
-        printf("Player: Position: (%f, %f)\tvelocity: (%f, %f)\tacceleration: (%f, %f)\n",player.position.x, player.position.y, player.velocity.x, player.velocity.y, player.acceleration.x, player.acceleration.y);
-        printf("newPlayerPosition: (x:%f, y:%f)\tnewPlayerVeclocity: (x:%f, y:%f)\tfloorHeight: %f\n", newPlayerPosition.x, newPlayerPosition.y, newPlayerVelocity.x, newPlayerVelocity.y, map.floorHeight);
-    }
+    newPlayerVelocity -= 0.0004 * newPlayerVelocity;
 
     player.position = newPlayerPosition;
     player.velocity = newPlayerVelocity;
 
-    if (newPlayerPosition.y > (map.floorHeight - player.boundingBox.height)) {
+    if (newPlayerPosition.y > (map.floorHeight - player.boundingBox.height)
+            && newPlayerPosition.x >= 0 - player.boundingBox.width
+            && newPlayerPosition.x <= map.width) {
         player.velocity.y = 0;
         player.acceleration.y = 0;
         player.position.y = map.floorHeight - player.boundingBox.height;
     }
-
-    ++printCount;
 }
