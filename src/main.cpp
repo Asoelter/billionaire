@@ -17,6 +17,8 @@ struct Vec2
     Vec2 operator-(Vec2 const & rhs) { return Vec2(x + rhs.x, y + rhs.y); }
 
     Vec2& operator-=(Vec2 const & rhs) { x -= rhs.x; y -= rhs.y; return *this; }
+
+    float dot(Vec2 const & rhs) const { return (x * rhs.y) + (y * rhs.x); }
 };
 
 template <typename Number>
@@ -24,6 +26,11 @@ Vec2 operator*(Number n, Vec2 const & v) { return Vec2(v.x * n, v.y * n); }
 
 template <typename Number>
 Vec2 operator*(Vec2 const & v, Number n) { return operator*(n, v);}
+
+float dot(Vec2 const & lhs, Vec2 const & rhs)
+{
+    return lhs.dot(rhs);
+}
 
 struct Point2
 {
@@ -35,8 +42,8 @@ struct Point2
 
     Point2& operator=(Point2 const & rhs) { x = rhs.x; y = rhs.y; return *this; }
 
-    Point2 operator+(Point2 const & rhs) {return Point2(x + rhs.x, y + rhs.y); }
-    Point2 operator-(Point2 const & rhs) {return Point2(x + rhs.x, y + rhs.y); }
+    Point2 operator+(Point2 const & rhs) { return Point2(x + rhs.x, y + rhs.y); }
+    Point2 operator-(Point2 const & rhs) { return Point2(x + rhs.x, y + rhs.y); }
 };
 
 Point2 operator+(Vec2 const & v, Point2 const & p) {return Point2{v.x + p.x, v.y + p.y};}
@@ -65,12 +72,20 @@ struct Player
     Vec2   acceleration;
 };
 
+struct Block
+{
+    Rect boundingBox;
+    Point2 position;
+};
+
 constexpr auto microsecondsInSecond = 1000000.0f;
 
 void drawMap(sf::RenderWindow& window, Map const & map);
 void drawPlayer(sf::RenderWindow& window, Player const & player);
 void applyGravity(std::chrono::microseconds deltaTime, Player & player);
-void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player);
+void initBlocks(Map const & map, std::vector<Block>& blocks);
+void drawBlocks(sf::RenderWindow& window, std::vector<Block>& blocks);
+void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player, std::vector<Block> const & blocks);
 
 int main()
 {
@@ -85,7 +100,7 @@ int main()
     auto window = sf::RenderWindow(videoMode, "Cool game");
     window.setVerticalSyncEnabled(true);
 
-    // Next we're going to create a matrix to define our world position. By default, SFML
+    // Next we're going to create a matrix to define our world position.
     // uses pixels as world space (this is dumb). We don't want to work with pixels. So,
     // just as a proof of concept for now, I'm defining a our world space to be whatever
     // makes the view able to hold 100 units in the x direction
@@ -94,8 +109,14 @@ int main()
     auto const scale = screenWindowWidth / worldWindowWidth;
     auto const worldWindowHeight = window.getSize().y / scale;
 
+    // SFML also dumbly has the positive y axis pointed down the screen, we're going to
+    // modify the view to fix that
     auto currentView = window.getView();
+
+    //auto currentView = window.getView();
     currentView.reset({{0, 0}, {worldWindowWidth, worldWindowHeight}});
+    //auto currentTransform = currentView.getTransform();;
+    //currentView.setSize({worldWindowWidth, -worldWindowHeight});
     window.setView(currentView);
 
     auto event = sf::Event();
@@ -112,6 +133,9 @@ int main()
     player.position     = {worldWindowWidth / 2, worldWindowHeight / 2};
     player.velocity     = {0, 0};
     player.acceleration = {0, 0};
+
+    auto blocks = std::vector<Block>();
+    initBlocks(map, blocks);
 
     std::chrono::microseconds prevFrameDuration = std::chrono::microseconds::zero();
 
@@ -145,9 +169,6 @@ int main()
                     else if (event.key.code == sf::Keyboard::Escape || event.key.code == sf::Keyboard::Key::Q) {
                         window.close();
                     }
-                    printf("acceleration: (x:%f, y:%f)\n", player.acceleration.x, player.acceleration.y);
-                    printf("velocity:     (x:%f, y:%f)\n", player.velocity.x, player.velocity.y);
-
                 } break;
                 case sf::Event::KeyReleased:
                 {
@@ -171,7 +192,7 @@ int main()
 
         applyGravity(prevFrameDuration, player);
 
-        updatePhysics(prevFrameDuration, map, player);
+        updatePhysics(prevFrameDuration, map, player, blocks);
 
         static auto printCount = 0;
 
@@ -182,6 +203,7 @@ int main()
         window.clear(); // begin frame
         drawMap(window, map);
         drawPlayer(window, player);
+        drawBlocks(window, blocks);
 
         auto const frameRate = 1.0 / prevFrameDuration.count() * microsecondsInSecond;
         auto const txt = std::to_string(frameRate);
@@ -225,7 +247,33 @@ void applyGravity(std::chrono::microseconds deltaTime, Player & player)
     player.acceleration.y += (deltaTime.count() / microsecondsInSecond) * gravity;
 }
 
-void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player)
+void initBlocks(Map const & map, std::vector<Block>& blocks)
+{
+    auto const numBlocks = map.width / 20.0f;
+    auto const blockSpacing = map.width / 20.0f;
+    auto const blockWidth = map.width / 200.0f;
+    auto const blockHeight = map.height / 15.0f;
+
+    for (int i = 0; i < numBlocks; ++i) {
+        auto newBlock = Block();
+        newBlock.boundingBox = {blockWidth, blockHeight};
+        newBlock.position = {i * blockSpacing, map.floorHeight - blockHeight};
+        blocks.push_back(newBlock);
+    }
+}
+
+void drawBlocks(sf::RenderWindow& window, std::vector<Block>& blocks)
+{
+    for (auto& block : blocks) {
+        auto rect = sf::RectangleShape({block.boundingBox.width, block.boundingBox.height});
+        rect.move({block.position.x, block.position.y});
+        rect.setFillColor(sf::Color::Red);
+
+        window.draw(rect);
+    }
+}
+
+void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player, std::vector<Block> const & blocks)
 {
     auto const deltaTimeInSeconds = deltaTime.count() / microsecondsInSecond;
 
@@ -236,14 +284,43 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
     auto newPlayerVelocity = (player.acceleration * deltaTimeInSeconds) + player.velocity;
     newPlayerVelocity -= 0.0004 * newPlayerVelocity;
 
+#if 0
+    for (auto& block : blocks) {
+        if (newPlayerPosition.x < block.position.x  + block.boundingBox.width // my left is less than your right
+                && newPlayerPosition.x + player.boundingBox.width > block.position.x // my right greater than your left
+                && newPlayerPosition.y < block.position.y + block.boundingBox.height // my top is above your bottom
+                && newPlayerPosition.y + player.boundingBox.height > block.position.y) { // bottom is above your top
+            // collision with block, no need to update position
+            player.velocity = {0, 0};
+            player.acceleration = {0, 0};
+            return;
+        }
+    }
+#endif
+
     player.position = newPlayerPosition;
     player.velocity = newPlayerVelocity;
 
+#if 0
     if (newPlayerPosition.y > (map.floorHeight - player.boundingBox.height)
             && newPlayerPosition.x >= 0 - player.boundingBox.width
             && newPlayerPosition.x <= map.width) {
         player.velocity.y = 0;
         player.acceleration.y = 0;
         player.position.y = map.floorHeight - player.boundingBox.height;
+    }
+#endif
+
+    if (newPlayerPosition.y + player.boundingBox.height > map.floorHeight
+            && newPlayerPosition.x >= 0 - player.boundingBox.width
+            && newPlayerPosition.x <= map.width) {
+        printf("collision!\n");
+        printf("velocity: (x:%f, y:%f)\n", player.velocity.x, player.velocity.y);
+        auto const reflection = Vec2(0, -1);
+        auto const dotResult = dot(player.velocity, reflection);
+        printf("dot: %f\n", dotResult);
+        player.velocity = player.velocity - (2 * dot(player.velocity, reflection) * reflection);
+        player.acceleration = {0, 0};
+        printf("velocity: (x:%f, y:%f)\n\n\n", player.velocity.x, player.velocity.y);
     }
 }
