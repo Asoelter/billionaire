@@ -14,11 +14,11 @@ struct Vec2
     float y;
 
     Vec2 operator+(Vec2 const & rhs) { return Vec2(x + rhs.x, y + rhs.y); }
-    Vec2 operator-(Vec2 const & rhs) { return Vec2(x + rhs.x, y + rhs.y); }
+    Vec2 operator-(Vec2 const & rhs) { return Vec2(x - rhs.x, y - rhs.y); }
 
     Vec2& operator-=(Vec2 const & rhs) { x -= rhs.x; y -= rhs.y; return *this; }
 
-    float dot(Vec2 const & rhs) const { return (x * rhs.y) + (y * rhs.x); }
+    float dot(Vec2 const & rhs) const { return (x * rhs.x) + (y * rhs.y); }
 };
 
 template <typename Number>
@@ -43,7 +43,7 @@ struct Point2
     Point2& operator=(Point2 const & rhs) { x = rhs.x; y = rhs.y; return *this; }
 
     Point2 operator+(Point2 const & rhs) { return Point2(x + rhs.x, y + rhs.y); }
-    Point2 operator-(Point2 const & rhs) { return Point2(x + rhs.x, y + rhs.y); }
+    Point2 operator-(Point2 const & rhs) { return Point2(x - rhs.x, y - rhs.y); }
 };
 
 Point2 operator+(Vec2 const & v, Point2 const & p) {return Point2{v.x + p.x, v.y + p.y};}
@@ -79,6 +79,7 @@ struct Block
 };
 
 constexpr auto microsecondsInSecond = 1000000.0f;
+auto gScreenHeight = 0.0f;
 
 void drawMap(sf::RenderWindow& window, Map const & map);
 void drawPlayer(sf::RenderWindow& window, Player const & player);
@@ -108,6 +109,7 @@ int main()
     auto const worldWindowWidth = 100.0f;
     auto const scale = screenWindowWidth / worldWindowWidth;
     auto const worldWindowHeight = window.getSize().y / scale;
+    gScreenHeight = worldWindowHeight;
 
     // SFML also dumbly has the positive y axis pointed down the screen, we're going to
     // modify the view to fix that
@@ -124,7 +126,7 @@ int main()
     Map map;
     map.width = 10 * worldWindowWidth;
     map.height = worldWindowHeight;
-    map.floorHeight = (2.0f / 3.0f) * worldWindowHeight;
+    map.floorHeight = (1.0f / 3.0f) * worldWindowHeight;
     map.floorColor = sf::Color(255, 165, 0); // orange-ish
     map.skyColor = sf::Color(0, 180, 255); // cyan-ish
 
@@ -155,13 +157,13 @@ int main()
                 case sf::Event::KeyPressed:
                 {
                     if (event.key.code == sf::Keyboard::Key::W || event.key.code == sf::Keyboard::Key::Up) {
-                        player.acceleration.y = -10.0f;
+                        player.acceleration.y = 50.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::A || event.key.code == sf::Keyboard::Key::Left) {
                         player.acceleration.x = -20.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::S || event.key.code == sf::Keyboard::Key::Down) {
-                        player.acceleration.y = 40.0f;
+                        player.acceleration.y = -40.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::D || event.key.code == sf::Keyboard::Key::Right) {
                         player.acceleration.x = 20.0f;
@@ -197,7 +199,7 @@ int main()
         static auto printCount = 0;
 
         auto currentView = window.getView();
-        currentView.setCenter({player.position.x, player.position.y});
+        currentView.setCenter({player.position.x, gScreenHeight-player.position.y});
         window.setView(currentView);
 
         window.clear(); // begin frame
@@ -222,10 +224,10 @@ int main()
 void drawMap(sf::RenderWindow& window, Map const & map)
 {
     auto floor = sf::RectangleShape({map.width, map.floorHeight});
-    floor.move({0.0f, map.floorHeight});
+    floor.move({0.0f, map.height - map.floorHeight});
     floor.setFillColor(map.floorColor);
 
-    auto sky = sf::RectangleShape({map.width, map.floorHeight});
+    auto sky = sf::RectangleShape({map.width, map.height - map.floorHeight});
     sky.setFillColor(map.skyColor);
 
     window.draw(floor);
@@ -235,7 +237,7 @@ void drawMap(sf::RenderWindow& window, Map const & map)
 void drawPlayer(sf::RenderWindow& window, Player const & player)
 {
     auto rect = sf::RectangleShape({player.boundingBox.width, player.boundingBox.height});
-    rect.move({player.position.x, player.position.y});
+    rect.move({player.position.x, gScreenHeight - player.position.y});
     rect.setFillColor(sf::Color::Green);
 
     window.draw(rect);
@@ -243,7 +245,7 @@ void drawPlayer(sf::RenderWindow& window, Player const & player)
 
 void applyGravity(std::chrono::microseconds deltaTime, Player & player)
 {
-    constexpr auto gravity = 9.81f; // m / s^2
+    constexpr auto gravity = -9.81f; // m / s^2
     player.acceleration.y += (deltaTime.count() / microsecondsInSecond) * gravity;
 }
 
@@ -257,7 +259,7 @@ void initBlocks(Map const & map, std::vector<Block>& blocks)
     for (int i = 0; i < numBlocks; ++i) {
         auto newBlock = Block();
         newBlock.boundingBox = {blockWidth, blockHeight};
-        newBlock.position = {i * blockSpacing, map.floorHeight - blockHeight};
+        newBlock.position = {i * blockSpacing, map.floorHeight + blockHeight};
         blocks.push_back(newBlock);
     }
 }
@@ -266,7 +268,7 @@ void drawBlocks(sf::RenderWindow& window, std::vector<Block>& blocks)
 {
     for (auto& block : blocks) {
         auto rect = sf::RectangleShape({block.boundingBox.width, block.boundingBox.height});
-        rect.move({block.position.x, block.position.y});
+        rect.move({block.position.x, gScreenHeight - block.position.y});
         rect.setFillColor(sf::Color::Red);
 
         window.draw(rect);
@@ -282,45 +284,75 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
                                  + player.position;
 
     auto newPlayerVelocity = (player.acceleration * deltaTimeInSeconds) + player.velocity;
-    newPlayerVelocity -= 0.0004 * newPlayerVelocity;
+    newPlayerVelocity -= 0.00004 * newPlayerVelocity;
 
-#if 0
     for (auto& block : blocks) {
+#if 0
         if (newPlayerPosition.x < block.position.x  + block.boundingBox.width // my left is less than your right
                 && newPlayerPosition.x + player.boundingBox.width > block.position.x // my right greater than your left
-                && newPlayerPosition.y < block.position.y + block.boundingBox.height // my top is above your bottom
-                && newPlayerPosition.y + player.boundingBox.height > block.position.y) { // bottom is above your top
+                && newPlayerPosition.y > block.position.y - block.boundingBox.height // my top is above your bottom
+                && newPlayerPosition.y - player.boundingBox.height < block.position.y) { // bottom is above your top
             // collision with block, no need to update position
             player.velocity = {0, 0};
             player.acceleration = {0, 0};
             return;
         }
-    }
 #endif
+
+        bool colided = false;
+
+        if (newPlayerPosition.x + player.boundingBox.width >= block.position.x                                   // player right greater than block left
+                && newPlayerPosition.x + player.boundingBox.width < block.position.x + block.boundingBox.width  // player right less than block right
+                && newPlayerPosition.y - player.boundingBox.height <= block.position.y                           // player bottom less than block top
+                && newPlayerPosition.y >= block.position.y - block.boundingBox.height) {                         // player top greater than block bottom
+            // player's right side colided with block's left side
+            printf("colided right to left\n");
+            auto const reflection = Vec2(-1.0f, 0.0f);
+            player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
+            colided = true;
+            //return;
+        }
+
+        if (newPlayerPosition.x <= block.position.x + block.boundingBox.width            // player left less than block right
+                && newPlayerPosition.x > block.position.x                                // player left greater than block left
+                && newPlayerPosition.y - player.boundingBox.height <= block.position.y   // player bottom less than block top
+                && newPlayerPosition.y >= block.position.y - block.boundingBox.height) { // player top greater than block bottom
+            // player's left side colided with block's right side
+            printf("colided left to right\n");
+            auto const reflection = Vec2(1.0f, 0.0f);
+            player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
+            colided = true;
+            //return;
+        }
+
+        if (newPlayerPosition.y - player.boundingBox.height < block.position.y                                   // player bottom less than block top
+                && newPlayerPosition.y - player.boundingBox.height > block.position.y - block.boundingBox.height // player bottom greater than block bottom
+                && newPlayerPosition.x + player.boundingBox.width > block.position.x                             // player right greater than block left
+                && newPlayerPosition.x < block.position.x + block.boundingBox.width) {                           // player left less than block right
+            // player's bottom side colided with block's top side
+            printf("colided bottom to top\n");
+            auto const reflection = Vec2(0.0f, 1.0f);
+            player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
+            player.acceleration.y = (deltaTime.count() / microsecondsInSecond) * 9.81; // equal and oposite gravitational force
+            colided = true;
+            //return;
+        }
+
+        if (colided) {
+            printf("\n");
+            return;
+        }
+    }
+
+    if (newPlayerPosition.y - player.boundingBox.height <= map.floorHeight
+            && newPlayerPosition.x >= 0 - player.boundingBox.width
+            && newPlayerPosition.x <= map.width) {
+        auto const reflection = Vec2(0, 1);
+        player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
+        player.acceleration.y = (deltaTime.count() / microsecondsInSecond) * 9.81; // equal and oposite gravitational force
+        return;
+    }
 
     player.position = newPlayerPosition;
     player.velocity = newPlayerVelocity;
-
-#if 0
-    if (newPlayerPosition.y > (map.floorHeight - player.boundingBox.height)
-            && newPlayerPosition.x >= 0 - player.boundingBox.width
-            && newPlayerPosition.x <= map.width) {
-        player.velocity.y = 0;
-        player.acceleration.y = 0;
-        player.position.y = map.floorHeight - player.boundingBox.height;
-    }
-#endif
-
-    if (newPlayerPosition.y + player.boundingBox.height > map.floorHeight
-            && newPlayerPosition.x >= 0 - player.boundingBox.width
-            && newPlayerPosition.x <= map.width) {
-        printf("collision!\n");
-        printf("velocity: (x:%f, y:%f)\n", player.velocity.x, player.velocity.y);
-        auto const reflection = Vec2(0, -1);
-        auto const dotResult = dot(player.velocity, reflection);
-        printf("dot: %f\n", dotResult);
-        player.velocity = player.velocity - (2 * dot(player.velocity, reflection) * reflection);
-        player.acceleration = {0, 0};
-        printf("velocity: (x:%f, y:%f)\n\n\n", player.velocity.x, player.velocity.y);
-    }
 }
