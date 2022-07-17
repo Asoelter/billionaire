@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include <SFML/Window.hpp>
@@ -12,6 +13,9 @@ struct Vec2
 
     float x;
     float y;
+
+    bool operator==(Vec2 const & rhs) const { return x == rhs.x && y == rhs.y; }
+    bool operator!=(Vec2 const & rhs) const { return !operator==(rhs); }
 
     Vec2 operator+(Vec2 const & rhs) { return Vec2(x + rhs.x, y + rhs.y); }
     Vec2 operator-(Vec2 const & rhs) { return Vec2(x - rhs.x, y - rhs.y); }
@@ -42,8 +46,7 @@ struct Point2
 
     Point2& operator=(Point2 const & rhs) { x = rhs.x; y = rhs.y; return *this; }
 
-    Point2 operator+(Point2 const & rhs) { return Point2(x + rhs.x, y + rhs.y); }
-    Point2 operator-(Point2 const & rhs) { return Point2(x - rhs.x, y - rhs.y); }
+    Vec2 operator-(Point2 const & rhs) const { return Vec2(x - rhs.x, y - rhs.y); }
 };
 
 Point2 operator+(Vec2 const & v, Point2 const & p) {return Point2{v.x + p.x, v.y + p.y};}
@@ -78,6 +81,8 @@ struct Block
     Point2 position;
 };
 
+using CollisionInfo = std::optional<Vec2>; //< vector normal to collision surface
+
 constexpr auto microsecondsInSecond = 1000000.0f;
 auto gScreenHeight = 0.0f;
 
@@ -87,6 +92,11 @@ void applyGravity(std::chrono::microseconds deltaTime, Player & player);
 void initBlocks(Map const & map, std::vector<Block>& blocks);
 void drawBlocks(sf::RenderWindow& window, std::vector<Block>& blocks);
 void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player & player, std::vector<Block> const & blocks);
+CollisionInfo detectCollisions(Point2 const & oldMoverPosition,
+                               Point2 const & newMoverPosition,
+                               Rect const & moverBoundingBox,
+                               Point2 const & stationaryPosition,
+                               Rect const & stationaryBoundingBox);
 
 int main()
 {
@@ -254,7 +264,7 @@ void initBlocks(Map const & map, std::vector<Block>& blocks)
     auto const numBlocks = map.width / 20.0f;
     auto const blockSpacing = map.width / 20.0f;
     auto const blockWidth = map.width / 200.0f;
-    auto const blockHeight = map.height / 15.0f;
+    auto const blockHeight = map.height / 9.0f;
 
     for (int i = 0; i < numBlocks; ++i) {
         auto newBlock = Block();
@@ -287,59 +297,15 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
     newPlayerVelocity -= 0.00004 * newPlayerVelocity;
 
     for (auto& block : blocks) {
-#if 0
-        if (newPlayerPosition.x < block.position.x  + block.boundingBox.width // my left is less than your right
-                && newPlayerPosition.x + player.boundingBox.width > block.position.x // my right greater than your left
-                && newPlayerPosition.y > block.position.y - block.boundingBox.height // my top is above your bottom
-                && newPlayerPosition.y - player.boundingBox.height < block.position.y) { // bottom is above your top
-            // collision with block, no need to update position
-            player.velocity = {0, 0};
-            player.acceleration = {0, 0};
-            return;
-        }
-#endif
+        auto maybeNormal = detectCollisions(player.position, newPlayerPosition, player.boundingBox, block.position, block.boundingBox);
 
-        bool colided = false;
+        if (maybeNormal) {
+            player.velocity = player.velocity - (dot(player.velocity, maybeNormal.value()) * maybeNormal.value());
 
-        if (newPlayerPosition.x + player.boundingBox.width >= block.position.x                                   // player right greater than block left
-                && newPlayerPosition.x + player.boundingBox.width < block.position.x + block.boundingBox.width  // player right less than block right
-                && newPlayerPosition.y - player.boundingBox.height <= block.position.y                           // player bottom less than block top
-                && newPlayerPosition.y >= block.position.y - block.boundingBox.height) {                         // player top greater than block bottom
-            // player's right side colided with block's left side
-            printf("colided right to left\n");
-            auto const reflection = Vec2(-1.0f, 0.0f);
-            player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
-            colided = true;
-            //return;
-        }
-
-        if (newPlayerPosition.x <= block.position.x + block.boundingBox.width            // player left less than block right
-                && newPlayerPosition.x > block.position.x                                // player left greater than block left
-                && newPlayerPosition.y - player.boundingBox.height <= block.position.y   // player bottom less than block top
-                && newPlayerPosition.y >= block.position.y - block.boundingBox.height) { // player top greater than block bottom
-            // player's left side colided with block's right side
-            printf("colided left to right\n");
-            auto const reflection = Vec2(1.0f, 0.0f);
-            player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
-            colided = true;
-            //return;
-        }
-
-        if (newPlayerPosition.y - player.boundingBox.height < block.position.y                                   // player bottom less than block top
-                && newPlayerPosition.y - player.boundingBox.height > block.position.y - block.boundingBox.height // player bottom greater than block bottom
-                && newPlayerPosition.x + player.boundingBox.width > block.position.x                             // player right greater than block left
-                && newPlayerPosition.x < block.position.x + block.boundingBox.width) {                           // player left less than block right
-            // player's bottom side colided with block's top side
-            printf("colided bottom to top\n");
-            auto const reflection = Vec2(0.0f, 1.0f);
-            player.velocity = player.velocity - (1 * dot(player.velocity, reflection) * reflection);
-            player.acceleration.y = (deltaTime.count() / microsecondsInSecond) * 9.81; // equal and oposite gravitational force
-            colided = true;
-            //return;
-        }
-
-        if (colided) {
-            printf("\n");
+            if (maybeNormal.value() == Vec2(0.0f, 1.0f)) {
+                // landed on something, must give reaction to gravity
+                player.acceleration.y = (deltaTime.count() / microsecondsInSecond) * 9.81f;
+            }
             return;
         }
     }
@@ -355,4 +321,63 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
 
     player.position = newPlayerPosition;
     player.velocity = newPlayerVelocity;
+}
+
+CollisionInfo detectCollisions(Point2 const & oldMoverPosition,
+                               Point2 const & newMoverPosition,
+                               Rect const & moverBoundingBox,
+                               Point2 const & stationaryPosition,
+                               Rect const & stationaryBoundingBox)
+{
+    // This algorithm works by finding the "time" it would take to collide with
+    // each wall of the stationary object, and selects the normal based off of
+    // which wall would be hit first
+
+    auto const moverDelta = newMoverPosition - oldMoverPosition;
+    CollisionInfo result;
+    auto tSoFar = 1;
+
+    if (moverDelta.x != 0.0f) { // prevent divide by 0
+        // left wall vs left wall (NOTE: left vs left is correct because of minkowski)
+        auto const tll = (stationaryPosition.x - oldMoverPosition.x) / moverDelta.x;
+
+        if (tll >= 0.0f && tll < tSoFar) {
+            // check that y would be within collision bounds
+            auto const yll = oldMoverPosition.y + (tll * moverDelta).y;
+
+            if (yll < stationaryPosition.y && yll > stationaryPosition.y - stationaryBoundingBox.height) {
+                tSoFar = tll;
+                result = Vec2(-1.0f, 0.0f);
+            }
+        }
+
+        // left wall vs right wall
+        auto const tlr = (stationaryPosition.x + stationaryBoundingBox.width - oldMoverPosition.x) / moverDelta.x;
+
+        if (tlr >= 0.0f && tlr < tSoFar) {
+            // check that y would be within collision bounds
+            auto const ylr = oldMoverPosition.y + (tlr * moverDelta).y;
+
+            if (ylr < stationaryPosition.y && ylr > stationaryPosition.y - stationaryBoundingBox.height) {
+                tSoFar = tlr;
+                result = Vec2(1.0f, 0.0f);
+            }
+        }
+    }
+
+    if (moverDelta.y != 0.0f) {
+        // top wall vs top wall
+        auto const ttt = (stationaryPosition.y - oldMoverPosition.y) / moverDelta.y;
+
+        if (ttt >= 0.0f && ttt < tSoFar) {
+            auto xtt = oldMoverPosition.x + (ttt * moverDelta).x;
+
+            if (xtt > stationaryPosition.x && xtt < stationaryPosition.x + stationaryBoundingBox.width) {
+                tSoFar = ttt;
+                result = Vec2(0.0f, 1.0f);
+            }
+        }
+    }
+
+    return result;
 }
