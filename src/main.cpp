@@ -175,16 +175,16 @@ int main()
                 case sf::Event::KeyPressed:
                 {
                     if (event.key.code == sf::Keyboard::Key::W || event.key.code == sf::Keyboard::Key::Up) {
-                        player.acceleration.y = 50.0f;
+                        player.acceleration.y = 1000.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::A || event.key.code == sf::Keyboard::Key::Left) {
-                        player.acceleration.x = -20.0f;
+                        player.acceleration.x = -1000.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::S || event.key.code == sf::Keyboard::Key::Down) {
-                        player.acceleration.y = -40.0f;
+                        player.acceleration.y = -1000.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Key::D || event.key.code == sf::Keyboard::Key::Right) {
-                        player.acceleration.x = 20.0f;
+                        player.acceleration.x = 1000.0f;
                     }
                     else if (event.key.code == sf::Keyboard::Escape || event.key.code == sf::Keyboard::Key::Q) {
                         window.close();
@@ -302,7 +302,7 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
                                  + player.position;
 
     auto newPlayerVelocity = (player.acceleration * deltaTimeInSeconds) + player.velocity;
-    newPlayerVelocity -= 0.00004 * newPlayerVelocity;
+    newPlayerVelocity -= 0.8 * newPlayerVelocity;
 
     for (auto& block : blocks) {
         auto collisionResult = detectCollisions(player.position, newPlayerPosition, player.boundingBox, block.position, block.boundingBox);
@@ -310,10 +310,6 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
         if (collisionResult.collided) {
             player.velocity = player.velocity - (dot(player.velocity, collisionResult.normal) * collisionResult.normal);
 
-            if (collisionResult.normal == Vec2(0.0f, 1.0f)) {
-                // landed on something, must give reaction to gravity
-                player.acceleration.y = (deltaTime.count() / microsecondsInSecond) * 9.81f;
-            }
             return;
         }
     }
