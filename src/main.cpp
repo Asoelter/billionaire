@@ -54,6 +54,9 @@ Point2 operator+(Point2 const & p, Vec2 const & v) {return operator+(v, p);}
 
 struct Rect
 {
+    Rect() = default;
+    Rect(float width, float height) : width(width), height(height) {}
+
     float width;
     float height;
 };
@@ -81,7 +84,12 @@ struct Block
     Point2 position;
 };
 
-using CollisionInfo = std::optional<Vec2>; //< vector normal to collision surface
+struct CollisionInfo
+{
+    Vec2  normal;               //< vector normal to collision surface
+    float percentThroughMove;   //< How far through the move the collision occured at
+    bool  collided = false;;
+};
 
 constexpr auto microsecondsInSecond = 1000000.0f;
 auto gScreenHeight = 0.0f;
@@ -142,7 +150,7 @@ int main()
 
     Player player;
     player.boundingBox  = {worldWindowWidth / 10, worldWindowHeight / 10};
-    player.position     = {worldWindowWidth / 2, worldWindowHeight / 2};
+    player.position     = {worldWindowWidth / 2, worldWindowHeight / 2 + 10};
     player.velocity     = {0, 0};
     player.acceleration = {0, 0};
 
@@ -297,12 +305,12 @@ void updatePhysics(std::chrono::microseconds deltaTime, Map const & map, Player 
     newPlayerVelocity -= 0.00004 * newPlayerVelocity;
 
     for (auto& block : blocks) {
-        auto maybeNormal = detectCollisions(player.position, newPlayerPosition, player.boundingBox, block.position, block.boundingBox);
+        auto collisionResult = detectCollisions(player.position, newPlayerPosition, player.boundingBox, block.position, block.boundingBox);
 
-        if (maybeNormal) {
-            player.velocity = player.velocity - (dot(player.velocity, maybeNormal.value()) * maybeNormal.value());
+        if (collisionResult.collided) {
+            player.velocity = player.velocity - (dot(player.velocity, collisionResult.normal) * collisionResult.normal);
 
-            if (maybeNormal.value() == Vec2(0.0f, 1.0f)) {
+            if (collisionResult.normal == Vec2(0.0f, 1.0f)) {
                 // landed on something, must give reaction to gravity
                 player.acceleration.y = (deltaTime.count() / microsecondsInSecond) * 9.81f;
             }
@@ -333,51 +341,60 @@ CollisionInfo detectCollisions(Point2 const & oldMoverPosition,
     // each wall of the stationary object, and selects the normal based off of
     // which wall would be hit first
 
+    // Minkowski adjustments
+    auto const adjustedStationaryPosition = Point2(stationaryPosition.x - moverBoundingBox.width, stationaryPosition.y + moverBoundingBox.height);
+    auto const adjustedStationaryBoundingBox = Rect(stationaryBoundingBox.width + moverBoundingBox.width, stationaryBoundingBox.height + moverBoundingBox.height);
+
     auto const moverDelta = newMoverPosition - oldMoverPosition;
     CollisionInfo result;
     auto tSoFar = 1;
 
     if (moverDelta.x != 0.0f) { // prevent divide by 0
         // left wall vs left wall (NOTE: left vs left is correct because of minkowski)
-        auto const tll = (stationaryPosition.x - oldMoverPosition.x) / moverDelta.x;
+        auto const tll = (adjustedStationaryPosition.x - oldMoverPosition.x) / moverDelta.x;
 
         if (tll >= 0.0f && tll < tSoFar) {
             // check that y would be within collision bounds
             auto const yll = oldMoverPosition.y + (tll * moverDelta).y;
 
-            if (yll < stationaryPosition.y && yll > stationaryPosition.y - stationaryBoundingBox.height) {
+            if (yll < adjustedStationaryPosition.y && yll > adjustedStationaryPosition.y - adjustedStationaryBoundingBox.height) {
                 tSoFar = tll;
-                result = Vec2(-1.0f, 0.0f);
+                result.normal = Vec2(-1.0f, 0.0f);
+                result.collided = true;
             }
         }
 
         // left wall vs right wall
-        auto const tlr = (stationaryPosition.x + stationaryBoundingBox.width - oldMoverPosition.x) / moverDelta.x;
+        auto const tlr = (adjustedStationaryPosition.x + adjustedStationaryBoundingBox.width - oldMoverPosition.x) / moverDelta.x;
 
         if (tlr >= 0.0f && tlr < tSoFar) {
             // check that y would be within collision bounds
             auto const ylr = oldMoverPosition.y + (tlr * moverDelta).y;
 
-            if (ylr < stationaryPosition.y && ylr > stationaryPosition.y - stationaryBoundingBox.height) {
+            if (ylr < adjustedStationaryPosition.y && ylr > adjustedStationaryPosition.y - adjustedStationaryBoundingBox.height) {
                 tSoFar = tlr;
-                result = Vec2(1.0f, 0.0f);
+                result.normal = Vec2(1.0f, 0.0f);
+                result.collided = true;
             }
         }
     }
 
     if (moverDelta.y != 0.0f) {
         // top wall vs top wall
-        auto const ttt = (stationaryPosition.y - oldMoverPosition.y) / moverDelta.y;
+        auto const ttt = (adjustedStationaryPosition.y - oldMoverPosition.y) / moverDelta.y;
 
         if (ttt >= 0.0f && ttt < tSoFar) {
             auto xtt = oldMoverPosition.x + (ttt * moverDelta).x;
 
-            if (xtt > stationaryPosition.x && xtt < stationaryPosition.x + stationaryBoundingBox.width) {
+            if (xtt > adjustedStationaryPosition.x && xtt < adjustedStationaryPosition.x + adjustedStationaryBoundingBox.width) {
                 tSoFar = ttt;
-                result = Vec2(0.0f, 1.0f);
+                result.normal = Vec2(0.0f, 1.0f);
+                result.collided = true;
             }
         }
     }
+
+    result.percentThroughMove = tSoFar;
 
     return result;
 }
